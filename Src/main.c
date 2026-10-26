@@ -62,6 +62,9 @@ static uint8_t frameLength = 0U;
 static char frameText[FRAME_MAX_AFTER_START + 1U];
 static letter_count_ frameLetters = {0U, 0U};
 
+/* SysTick interrupt increments this every 1 ms. */
+volatile uint32_t g_systemMs = 0U;
+
 /* DMA TX uses this persistent buffer, never a stack-local char array. */
 static uint8_t txBuffer[TX_BUFFER_SIZE];
 
@@ -88,6 +91,25 @@ static uint8_t sendFrameFromQueue(void)
     return 1U;
 }
 
+static void sendBufferState(void)
+{
+    uint32_t occupied = (uint32_t)USART2_GetRxBufferOccupancy();
+    /* Integer fixed-point avoids _printf_float and linker modifications. */
+    uint32_t percentTenths = (occupied * 1000U +
+                              DMA_USART2_BUFFER_SIZE / 2U) /
+                              DMA_USART2_BUFFER_SIZE;
+    int n = snprintf((char *)txBuffer, sizeof(txBuffer),
+          "Buffer capacity: %u bytes, occupied memory: %lu bytes, "
+          "load [in %%]: %lu.%01lu%%\r\n",
+          (unsigned)DMA_USART2_BUFFER_SIZE, (unsigned long)occupied,
+          (unsigned long)(percentTenths / 10U),
+          (unsigned long)(percentTenths % 10U));
+    if ((n > 0) && (n < (int)sizeof(txBuffer)))
+    {
+        USART2_PutBuffer(txBuffer, (uint8_t)n);
+    }
+}
+
 
 int main(void)
 {
@@ -107,6 +129,8 @@ int main(void)
 
   /* Callback is invoked by RX interrupts, one received byte at a time. */
   USART2_RegisterCallback(proccesDmaData);
+  uint32_t lastReportMs = g_systemMs;
+  uint8_t reportPending = 0U;
 
   while (1)
   {
@@ -122,6 +146,13 @@ int main(void)
 	   * Example message (what I wish to see in terminal) - Valid string: Platn15uborZnakov, lower-case: 13, upper-case: 2
 	   */
 
+      uint32_t now = g_systemMs;
+      if ((uint32_t)(now - lastReportMs) >= 2000U)
+      {
+          lastReportMs = now;
+          reportPending = 1U;
+      }
+
       /* Never overwrite txBuffer while DMA channel 7 is transmitting. */
       if (LL_DMA_IsEnabledChannel(DMA1, LL_DMA_CHANNEL_7) == 0U)
       {
@@ -129,6 +160,11 @@ int main(void)
           if (frameReadIndex != frameWriteIndex)
           {
               (void)sendFrameFromQueue();
+          }
+          else if (reportPending != 0U)
+          {
+              reportPending = 0U;
+              sendBufferState();
           }
       }
   }
