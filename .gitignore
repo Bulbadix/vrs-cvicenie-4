@@ -1,0 +1,6 @@
+# Generated STM32CubeIDE build output
+/Debug/
+/Release/
+# Machine-dependent IDE preferences and launches
+/.settings/*.prefs
+*.launch
