@@ -27,7 +27,7 @@ uint8_t bufferUSART2dma[DMA_USART2_BUFFER_SIZE];
 static void (* USART2_ProcessData)(uint8_t data) = 0;
 
 /* Register callback */
-void USART2_RegisterCallback(void *callback)
+void USART2_RegisterCallback(void (*callback)(uint8_t))
 {
 	if(callback != 0)
 	{
@@ -35,9 +35,14 @@ void USART2_RegisterCallback(void *callback)
 	}
 }
 
-/* Space for global variables, if you need them */
+/* Offset of already forwarded bytes inside the current NORMAL DMA transfer. */
+static uint16_t dmaRxReadPos = 0;
 
-	// type global variables here
+/* Half-buffer rearm means at least 64 bytes of free space are reserved.
+ * Each incoming PC burst is at most 20 characters (assignment assumption).
+ */
+#define DMA_RX_REARM_LEVEL (DMA_USART2_BUFFER_SIZE / 2U)
+
 
 
 /* USART2 init function */
@@ -71,13 +76,28 @@ void MX_USART2_UART_Init(void)
   
   /* USART2_RX Init */
 
-  	  // type DMA USART Rx configuration here
+  LL_DMA_ConfigTransfer(DMA1, LL_DMA_CHANNEL_6,
+      LL_DMA_DIRECTION_PERIPH_TO_MEMORY |
+      LL_DMA_MODE_NORMAL |
+      LL_DMA_PERIPH_NOINCREMENT |
+      LL_DMA_MEMORY_INCREMENT |
+      LL_DMA_PDATAALIGN_BYTE |
+      LL_DMA_MDATAALIGN_BYTE |
+      LL_DMA_PRIORITY_MEDIUM);
+  LL_DMA_SetPeriphAddress(DMA1, LL_DMA_CHANNEL_6,
+      LL_USART_DMA_GetRegAddr(USART2, LL_USART_DMA_REG_DATA_RECEIVE));
+  LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_6,
+      (uint32_t)bufferUSART2dma);
+  LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_6, DMA_USART2_BUFFER_SIZE);
+  LL_DMA_ClearFlag_GI6(DMA1);
+  LL_DMA_EnableIT_HT(DMA1, LL_DMA_CHANNEL_6);
+  LL_DMA_EnableIT_TC(DMA1, LL_DMA_CHANNEL_6);
+  LL_DMA_EnableIT_TE(DMA1, LL_DMA_CHANNEL_6);
 
 
   /* USART2_TX Init */
 
-	  // type DMA USART Tx configuration here
-
+  /* DMA TX will be configured in a separate step. */
 
   /* USART2 interrupt Init */
   NVIC_SetPriority(USART2_IRQn, 0);
@@ -96,7 +116,10 @@ void MX_USART2_UART_Init(void)
 
   /* Enable USART2 peripheral and interrupts*/
 
-  	  //type your code here:
+  LL_USART_EnableIT_IDLE(USART2);
+  LL_USART_EnableDMAReq_RX(USART2);
+  LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_6);
+  LL_USART_Enable(USART2);
 }
 
 
@@ -121,7 +144,62 @@ void USART2_PutBuffer(uint8_t *buffer, uint8_t length)
  */
 void USART2_CheckDmaReception(void)
 {
-	//type your implementation here
+    /* Called by RX-DMA HT/TC and USART IDLE interrupts at equal priority.
+     * Normal mode: CNDTR only decreases; no circular wrap is possible.
+     */
+    uint16_t remaining = (uint16_t)LL_DMA_GetDataLength(DMA1, LL_DMA_CHANNEL_6);
+    uint16_t received = DMA_USART2_BUFFER_SIZE - remaining;
+
+    /* Forward each new byte exactly once. */
+    while (dmaRxReadPos < received)
+    {
+        uint8_t byte = bufferUSART2dma[dmaRxReadPos++];
+        if (USART2_ProcessData != 0)
+        {
+            USART2_ProcessData(byte);
+        }
+    }
+
+    /* Proactively restart at half buffer (64/128), not at the last byte.
+     * If transfer already stopped (TC/error), restart regardless of offset.
+     */
+    if ((received >= DMA_RX_REARM_LEVEL) ||
+        (LL_DMA_IsEnabledChannel(DMA1, LL_DMA_CHANNEL_6) == 0U))
+    {
+        LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_6);
+
+        /* Capture bytes written between the first CNDTR read and disable. */
+        remaining = (uint16_t)LL_DMA_GetDataLength(DMA1, LL_DMA_CHANNEL_6);
+        received = DMA_USART2_BUFFER_SIZE - remaining;
+        while (dmaRxReadPos < received)
+        {
+            uint8_t byte = bufferUSART2dma[dmaRxReadPos++];
+            if (USART2_ProcessData != 0)
+            {
+                USART2_ProcessData(byte);
+            }
+        }
+
+        LL_DMA_ClearFlag_GI6(DMA1);
+        LL_DMA_SetMemoryAddress(DMA1, LL_DMA_CHANNEL_6,
+                                (uint32_t)bufferUSART2dma);
+        LL_DMA_SetDataLength(DMA1, LL_DMA_CHANNEL_6, DMA_USART2_BUFFER_SIZE);
+        dmaRxReadPos = 0;
+        LL_DMA_EnableChannel(DMA1, LL_DMA_CHANNEL_6);
+    }
+}
+
+/* Snapshot of physically occupied DMA bytes since its most recent rearm.
+ * This is NOT the number of unprocessed bytes; bytes may already be parsed.
+ */
+uint16_t USART2_GetRxBufferOccupancy(void)
+{
+    uint16_t remaining = (uint16_t)LL_DMA_GetDataLength(DMA1, LL_DMA_CHANNEL_6);
+    if (remaining > DMA_USART2_BUFFER_SIZE)
+    {
+        return 0U;
+    }
+    return DMA_USART2_BUFFER_SIZE - remaining;
 }
 
 
