@@ -218,18 +218,23 @@ void DMA1_Channel6_IRQHandler(void)
     }
 }
 
-/**
-  * @brief This function handles DMA1 channel7 global interrupt.
-  */
+/** DMA1 Channel 7: transmission complete / transfer error. */
 void DMA1_Channel7_IRQHandler(void)
 {
-	if(LL_DMA_IsActiveFlag_TC7(DMA1) == SET)
-	{
-		LL_DMA_ClearFlag_TC7(DMA1);
-
-		while(LL_USART_IsActiveFlag_TC(USART2) == RESET);
-		LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_7);
-	}
+    if (LL_DMA_IsActiveFlag_TE7(DMA1) != RESET)
+    {
+        LL_DMA_ClearFlag_TE7(DMA1);
+        LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_7);
+    }
+    if (LL_DMA_IsActiveFlag_TC7(DMA1) != RESET)
+    {
+        LL_DMA_ClearFlag_TC7(DMA1);
+        while (LL_USART_IsActiveFlag_TC(USART2) == RESET)
+        {
+            /* Wait for the final stop bit before reusing the TX buffer. */
+        }
+        LL_DMA_DisableChannel(DMA1, LL_DMA_CHANNEL_7);
+    }
 }
 
 /** USART2: end of an incoming burst (IDLE). */
