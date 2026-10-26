@@ -200,6 +200,7 @@ void SystemClock_Config(void)
   }
   LL_Init1msTick(8000000);
   LL_SYSTICK_SetClkSource(LL_SYSTICK_CLKSOURCE_HCLK);
+  LL_SYSTICK_EnableIT(); /* Allow SysTick_Handler to increment g_systemMs every 1 ms. */
   LL_SetSystemCoreClock(8000000);
 }
 
