@@ -22,6 +22,7 @@
 #include "main.h"
 #include "usart.h"
 #include "stm32f3xx_it.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
@@ -187,7 +188,6 @@ void SysTick_Handler(void)
   /* USER CODE END SysTick_IRQn 0 */
   
   /* USER CODE BEGIN SysTick_IRQn 1 */
-
   /* USER CODE END SysTick_IRQn 1 */
 }
 
@@ -203,16 +203,19 @@ void SysTick_Handler(void)
   */
 void DMA1_Channel6_IRQHandler(void)
 {
-	if(LL_DMA_IsActiveFlag_TC6(DMA1) == SET)
-	{
-		USART2_CheckDmaReception();
-		LL_DMA_ClearFlag_TC6(DMA1);
-	}
-	else if(LL_DMA_IsActiveFlag_HT6(DMA1) == SET)
-	{
-		USART2_CheckDmaReception();
-		LL_DMA_ClearFlag_HT6(DMA1);
-	}
+    if (LL_DMA_IsActiveFlag_TE6(DMA1) != RESET)
+    {
+        LL_DMA_ClearFlag_TE6(DMA1);
+        /* Unexpected DMA hardware fault: flush received bytes, rearm RX. */
+        USART2_CheckDmaReception();
+    }
+    if ((LL_DMA_IsActiveFlag_TC6(DMA1) != RESET) ||
+        (LL_DMA_IsActiveFlag_HT6(DMA1) != RESET))
+    {
+        LL_DMA_ClearFlag_TC6(DMA1);
+        LL_DMA_ClearFlag_HT6(DMA1);
+        USART2_CheckDmaReception();
+    }
 }
 
 /**
@@ -229,16 +232,29 @@ void DMA1_Channel7_IRQHandler(void)
 	}
 }
 
-/**
-  * @brief This function handles USART2 global interrupt.
-  */
+/** USART2: end of an incoming burst (IDLE). */
 void USART2_IRQHandler(void)
 {
-	if(LL_USART_IsActiveFlag_IDLE(USART2))
-	{
-		USART2_CheckDmaReception();
-		LL_USART_ClearFlag_IDLE(USART2);
-	}
+    if (LL_USART_IsActiveFlag_IDLE(USART2) != RESET)
+    {
+        LL_USART_ClearFlag_IDLE(USART2);
+        USART2_CheckDmaReception();
+    }
+    /* Hardware overrun is not recoverable for already-lost bytes, but
+     * clear the flag to allow subsequent frames to be received.
+     */
+    if (LL_USART_IsActiveFlag_ORE(USART2) != RESET)
+    {
+        LL_USART_ClearFlag_ORE(USART2);
+    }
+    if (LL_USART_IsActiveFlag_FE(USART2) != RESET)
+    {
+        LL_USART_ClearFlag_FE(USART2);
+    }
+    if (LL_USART_IsActiveFlag_NE(USART2) != RESET)
+    {
+        LL_USART_ClearFlag_NE(USART2);
+    }
 }
 /* USER CODE BEGIN 1 */
 
